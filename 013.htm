@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>3. Проектирование программного обеспечения — Система аренды спортивного инвентаря</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- общий стиль -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- локальные штрихи + границы таблиц -->
+  <style>
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #cfcfcf; padding: 6px 8px; vertical-align: top; }
+    th { background: #f7f7f9; text-align: left; }
+    code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; }
+    nav a { margin-right: 10px; }
+    .subtitle { color:#666; }
+  </style>
+
+  <!-- Mermaid -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });</script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>3. Проектирование программного обеспечения</h1>
+      <div class="subtitle">Учебный кейс: «Система аренды спортивного инвентаря» (.NET 6/8, C#)</div>
+      <nav>
+        <a href="#structure">3.1 Структура программы</a>
+        <a href="#flow">3.2 Основной алгоритм</a>
+        <a href="#uml">3.3 UML классов</a>
+        <a href="#sequence">3.4 Взаимодействие модулей</a>
+        <a href="#arch">3.5 Особенности архитектуры</a>
+      </nav>
+    </header>
+
+    <!-- 3.1 -->
+    <section id="structure">
+      <h2>3.1. Описание структуры программы</h2>
+      <p>Программный продукт реализуется как модульное приложение на языке C# (.NET 6/8), сочетающее структурный и объектно-ориентированный подходы. Основные уровни:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Уровень</th>
+            <th>Назначение</th>
+            <th>Примеры классов/модулей</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Данные (Data Layer)</td>
+            <td>Хранение и доступ к локальным JSON-файлам</td>
+            <td><code>DataStorage</code>, <code>FileRepository</code></td>
+          </tr>
+          <tr>
+            <td>Бизнес-логика (Business Logic)</td>
+            <td>Операции аренды, расчёт тарифов, управление статусами</td>
+            <td><code>RentalService</code>, <code>TariffCalculator</code>, <code>MaintenanceService</code></td>
+          </tr>
+          <tr>
+            <td>Представление (UI Layer)</td>
+            <td>Взаимодействие с пользователем (меню или формы)</td>
+            <td><code>Program</code>, <code>ConsoleUI</code>, <code>FormMain</code></td>
+          </tr>
+          <tr>
+            <td>Модели (Domain Entities)</td>
+            <td>Классы предметной области (объекты учёта)</td>
+            <td><code>Customer</code>, <code>InventoryItem</code>, <code>Rental</code>, <code>Tariff</code>, <code>MaintenanceRecord</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 3.2 -->
+    <section id="flow">
+      <h2>3.2. Основной алгоритм (flowchart)</h2>
+      <p>Блок-схема основного сценария: оформление аренды и возврат инвентаря.</p>
+      <pre class="mermaid">
+flowchart TD
+  A[Начало]
+  B[Меню: выбрать действие]
+  C{Создать новую аренду?}
+  D[Выбор клиента]
+  E[Выбор инвентаря]
+  F{Инвентарь доступен?}
+  G[Выбор тарифа]
+  H[Расчёт стоимости]
+  I[Создание договора аренды status = open]
+  J[Сохранение в файл rentals.json]
+  K[Вывод подтверждения]
+  L{Возврат инвентаря?}
+  M[Поиск договора по ID]
+  N[Ввод фактического времени]
+  O[Перерасчёт суммы и штрафов]
+  P[Изменение статуса на closed]
+  Q[Обновление статуса инвентаря на доступен]
+  R[Формирование отчёта]
+  Z[Конец]
+
+  A --> B
+  B --> C
+  C -->|Да| D
+  D --> E
+  E --> F
+  F -->|Да| G
+  F -->|Нет| B
+  G --> H --> I --> J --> K --> B
+  C -->|Нет| L
+  L -->|Да| M --> N --> O --> P --> Q --> R --> B
+  L -->|Нет| Z
+      </pre>
+    </section>
+
+    <!-- 3.3 -->
+    <section id="uml">
+      <h2>3.3. UML-диаграмма классов</h2>
+      <pre class="mermaid">
+classDiagram
+direction LR
+
+class Customer {
+  +Guid Id
+  +string FullName
+  +string Phone
+  +string DocumentId
+}
+
+class InventoryItem {
+  +Guid Id
+  +string InvNumber
+  +string Category
+  +string Condition
+  +string Status
+  +DateTime LastServiceAt
+  +void ChangeStatus(string newStatus)
+}
+
+class Tariff {
+  +Guid Id
+  +string Name
+  +string Mode  // hour/day/package
+  +decimal Rate
+  +string RoundRule
+}
+
+class Rental {
+  +Guid Id
+  +Customer Customer
+  +InventoryItem Item
+  +Tariff Tariff
+  +DateTime StartAt
+  +DateTime? EndAt
+  +decimal BaseAmount
+  +decimal Discount
+  +decimal Penalty
+  +decimal Total
+  +string Status
+  +void CloseRental(DateTime endAt)
+}
+
+class MaintenanceRecord {
+  +Guid Id
+  +InventoryItem Item
+  +DateTime Date
+  +string Work
+  +string Note
+}
+
+class TariffCalculator {
+  +decimal Calculate(Tariff t, DateTime start, DateTime end)
+}
+
+class DataStorage {
+  +List~Customer~ Customers
+  +List~InventoryItem~ Items
+  +List~Tariff~ Tariffs
+  +List~Rental~ Rentals
+  +List~MaintenanceRecord~ Maintenances
+  +void LoadAll()
+  +void SaveAll()
+}
+
+class RentalService {
+  +void OpenRental(Customer c, InventoryItem i, Tariff t)
+  +void CloseRental(Guid rentalId)
+  +List~Rental~ GetActiveRentals()
+}
+
+Customer "1" --> "0..*" Rental : оформляет
+InventoryItem "1" --> "0..*" Rental : участвует
+InventoryItem "1" --> "0..*" MaintenanceRecord : проходит ТО
+Tariff "1" --> "0..*" Rental : применяется
+RentalService --> DataStorage : использует
+Rental --> TariffCalculator : расчёт
+      </pre>
+
+      <p><strong>Краткое описание классов:</strong></p>
+      <ul>
+        <li><code>Customer</code> — модель клиента.</li>
+        <li><code>InventoryItem</code> — описание единицы инвентаря и статусов.</li>
+        <li><code>Tariff</code> — тариф с параметрами расчёта.</li>
+        <li><code>Rental</code> — договор аренды, связь клиент↔инвентарь↔тариф.</li>
+        <li><code>MaintenanceRecord</code> — запись технического обслуживания.</li>
+        <li><code>TariffCalculator</code> — вычисление стоимости по тарифу и интервалу времени.</li>
+        <li><code>DataStorage</code> — загрузка/сохранение данных из JSON.</li>
+        <li><code>RentalService</code> — бизнес-логика управления арендами.</li>
+      </ul>
+    </section>
+
+    <!-- 3.4 -->
+    <section id="sequence">
+      <h2>3.4. Схема взаимодействия модулей</h2>
+      <pre class="mermaid">
+sequenceDiagram
+  participant U as Пользователь
+  participant UI as Интерфейс
+  participant RS as RentalService
+  participant DS as DataStorage
+  participant TC as TariffCalculator
+
+  U->>UI: Выбрать "Создать аренду"
+  UI->>RS: Запрос создания аренды (данные клиента, инвентаря, тарифа)
+  RS->>DS: Проверить доступность инвентаря
+  DS-->>RS: Статус "доступен"
+  RS->>TC: Рассчитать стоимость (startAt, tariff)
+  TC-->>RS: Возврат суммы
+  RS->>DS: Сохранить договор в rentals.json
+  DS-->>RS: Подтверждение
+  RS-->>UI: Успешно создан договор
+  UI-->>U: Отображение информации и сумма аренды
+      </pre>
+    </section>
+
+    <!-- 3.5 -->
+    <section id="arch">
+      <h2>3.5. Особенности архитектуры и проектных решений</h2>
+      <ul>
+        <li>Шаблон <em>Layered Architecture</em> (UI / Business Logic / Data / Domain).</li>
+        <li>Репозиторий с сериализацией JSON (через <code>System.Text.Json</code>); атомарная запись файлов.</li>
+        <li>Инкапсуляция доменных моделей; операции — через сервисы (<code>RentalService</code>, <code>MaintenanceService</code>).</li>
+        <li>Валидация входных данных и обработка исключений на границах слоёв.</li>
+        <li>Документирование кода XML-комментариями для ключевых типов и методов.</li>
+      </ul>
+    </section>
+
+    
+  </div>
+</body>
+</html>

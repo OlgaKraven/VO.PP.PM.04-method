@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>4. Реализация программного продукта — Система аренды спортивного инвентаря</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- общий стиль -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- локальные штрихи + границы таблиц -->
+  <style>
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #cfcfcf; padding: 6px 8px; vertical-align: top; }
+    th { background: #f7f7f9; text-align: left; }
+    code, pre code { background: #f6f8fa; border-radius: 4px; }
+    pre { overflow: auto; padding: 10px; background: #f6f8fa; border: 1px solid #e5e7eb; border-radius: 6px; }
+    nav a { margin-right: 10px; }
+    .subtitle { color:#666; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .filename { margin: 8px 0 4px; font-weight: 600; }
+  </style>
+
+  <!-- Mermaid (на будущее — если добавите схемы) -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });</script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>4. Реализация программного продукта</h1>
+      <div class="subtitle">Учебный кейс: «Система аренды спортивного инвентаря» (.NET 6/8, C#)</div>
+      <nav>
+        <a href="#structure">4.1 Структура проекта</a>
+        <a href="#domain">4.2 Модели предметной области</a>
+        <a href="#storage">4.3 Работа с данными</a>
+        <a href="#calc">4.4 Расчёт тарифов</a>
+        <a href="#service">4.5 Бизнес-логика аренды</a>
+        <a href="#ui">4.6 Консольный интерфейс</a>
+        <a href="#seed">4.7 Данные (фрагменты)</a>
+        <a href="#ux">4.8 Описание интерфейса</a>
+        <a href="#quality">4.9 Качество кода</a>
+        <a href="#demo">4.10 Пример приложения</a>
+      </nav>
+    </header>
+
+    <!-- 4.1 -->
+    <section id="structure">
+      <h2>4.1. Структура проекта (Console App)</h2>
+
+      <pre class="mono"><code>rental-sport-inventory/
+├─ src/
+│  ├─ RentalApp/
+│  │  ├─ Program.cs
+│  │  ├─ AppConfig.cs
+│  │  ├─ Domain/
+│  │  │  ├─ Customer.cs
+│  │  │  ├─ InventoryItem.cs
+│  │  │  ├─ Tariff.cs
+│  │  │  ├─ Rental.cs
+│  │  │  ├─ MaintenanceRecord.cs
+│  │  ├─ Services/
+│  │  │  ├─ DataStorage.cs
+│  │  │  ├─ TariffCalculator.cs
+│  │  │  ├─ RentalService.cs
+│  │  │  ├─ MaintenanceService.cs
+│  │  ├─ Utils/
+│  │  │  ├─ Guard.cs
+│  │  │  ├─ ConsoleUi.cs
+│  │  └─ RentalApp.csproj
+│  └─ README.md
+├─ data/
+│  ├─ customers.json
+│  ├─ items.json
+│  ├─ tariffs.json
+│  ├─ rentals.json
+│  ├─ maintenance.json
+└─ .gitignore</code></pre>
+
+      <table>
+        <thead>
+          <tr><th>Зависимости</th><th>Запуск</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Стандартная библиотека .NET (<code>System.Text.Json</code>)</td>
+            <td><code>dotnet run --project src/RentalApp</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="filename">RentalApp.csproj</div>
+      <pre><code class="language-xml">&lt;Project Sdk="Microsoft.NET.Sdk"&gt;
+  &lt;PropertyGroup&gt;
+    &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+    &lt;TargetFramework&gt;net8.0&lt;/TargetFramework&gt;
+    &lt;Nullable&gt;enable&lt;/Nullable&gt;
+    &lt;ImplicitUsings&gt;enable&lt;/ImplicitUsings&gt;
+  &lt;/PropertyGroup&gt;
+&lt;/Project&gt;</code></pre>
+    </section>
+
+    <!-- 4.2 -->
+    <section id="domain">
+      <h2>4.2. Модели предметной области (Domain)</h2>
+
+      <div class="filename">Customer.cs</div>
+      <pre><code class="language-csharp">namespace RentalApp.Domain;
+
+public sealed class Customer
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public string FullName { get; set; } = "";
+    public string Phone { get; set; } = "";
+    public string? DocumentId { get; set; }
+}</code></pre>
+
+      <div class="filename">InventoryItem.cs</div>
+      <pre><code class="language-csharp">namespace RentalApp.Domain;
+
+public sealed class InventoryItem
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public string InvNumber { get; set; } = "";            // e.g. INV-0001
+    public string Category { get; set; } = "Bicycle";      // Bicycle/Skates/Skis...
+    public string Condition { get; set; } = "Good";
+    public string Status { get; private set; } = "available"; // available/rented/maintenance
+    public DateTime? LastServiceAt { get; set; }
+
+    public void ChangeStatus(string newStatus)
+    {
+        if (newStatus is not ("available" or "rented" or "maintenance"))
+            throw new ArgumentOutOfRangeException(nameof(newStatus), "Unknown status");
+        Status = newStatus;
+    }
+}</code></pre>
+
+      <div class="filename">Tariff.cs</div>
+      <pre><code class="language-csharp">namespace RentalApp.Domain;
+
+public sealed class Tariff
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public string Name { get; set; } = "Часовой";
+    public string Mode { get; set; } = "hour";            // hour/day/package
+    public decimal Rate { get; set; }                     // базовая ставка
+    public string RoundRule { get; set; } = "ceil_30min"; // правило округления
+}</code></pre>
+
+      <div class="filename">Rental.cs</div>
+      <pre><code class="language-csharp">namespace RentalApp.Domain;
+
+public sealed class Rental
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid CustomerId { get; init; }
+    public Guid ItemId { get; init; }
+    public Guid TariffId { get; init; }
+    public DateTime StartAt { get; init; } = DateTime.Now;
+    public DateTime? EndAt { get; private set; }
+    public decimal BaseAmount { get; private set; }
+    public decimal Discount { get; set; }
+    public decimal Penalty { get; set; }
+    public decimal Total { get; private set; }
+    public string Status { get; private set; } = "open"; // open/closed
+
+    public void Close(DateTime endAt, decimal baseAmount, decimal discount, decimal penalty)
+    {
+        if (Status == "closed") throw new InvalidOperationException("Rental already closed");
+        EndAt = endAt;
+        BaseAmount = baseAmount;
+        Discount = discount;
+        Penalty = penalty;
+        Total = Math.Max(0, baseAmount - discount + penalty);
+        Status = "closed";
+    }
+}</code></pre>
+
+      <div class="filename">MaintenanceRecord.cs</div>
+      <pre><code class="language-csharp">namespace RentalApp.Domain;
+
+public sealed class MaintenanceRecord
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid ItemId { get; init; }
+    public DateTime Date { get; init; } = DateTime.Today;
+    public string Work { get; set; } = "";
+    public string? Note { get; set; }
+}</code></pre>
+    </section>
+
+    <!-- 4.3 -->
+    <section id="storage">
+      <h2>4.3. Работа с данными (DataStorage)</h2>
+      <p><em>DataStorage.cs</em> — простой репозиторий JSON (атомарная запись через временный файл).</p>
+      <pre><code class="language-csharp">using System.Text.Json;
+using System.Text.Json.Serialization;
+using RentalApp.Domain;
+
+namespace RentalApp.Services;
+
+public sealed class DataStorage
+{
+    private readonly string _dir;
+    private readonly JsonSerializerOptions _json = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public List&lt;Customer&gt; Customers { get; private set; } = new();
+    public List&lt;InventoryItem&gt; Items { get; private set; } = new();
+    public List&lt;Tariff&gt; Tariffs { get; private set; } = new();
+    public List&lt;Rental&gt; Rentals { get; private set; } = new();
+    public List&lt;MaintenanceRecord&gt; Maintenances { get; private set; } = new();
+
+    public DataStorage(string dataDirectory)
+    {
+        _dir = dataDirectory;
+        Directory.CreateDirectory(_dir);
+    }
+
+    public void LoadAll()
+    {
+        Customers    = Load&lt;List&lt;Customer&gt;&gt;("customers.json")    ?? new();
+        Items        = Load&lt;List&lt;InventoryItem&gt;&gt;("items.json")   ?? new();
+        Tariffs      = Load&lt;List&lt;Tariff&gt;&gt;("tariffs.json")        ?? new();
+        Rentals      = Load&lt;List&lt;Rental&gt;&gt;("rentals.json")        ?? new();
+        Maintenances = Load&lt;List&lt;MaintenanceRecord&gt;&gt;("maintenance.json") ?? new();
+    }
+
+    public void SaveAll()
+    {
+        Save("customers.json", Customers);
+        Save("items.json", Items);
+        Save("tariffs.json", Tariffs);
+        Save("rentals.json", Rentals);
+        Save("maintenance.json", Maintenances);
+    }
+
+    private T? Load&lt;T&gt;(string file)
+    {
+        var path = Path.Combine(_dir, file);
+        if (!File.Exists(path)) return default;
+        var json = File.ReadAllText(path);
+        return JsonSerializer.Deserialize&lt;T&gt;(json, _json);
+    }
+
+    private void Save&lt;T&gt;(string file, T data)
+    {
+        var path = Path.Combine(_dir, file);
+        var tmp  = path + ".tmp";
+        var json = JsonSerializer.Serialize(data, _json);
+        File.WriteAllText(tmp, json);
+        File.Copy(tmp, path, overwrite: true);
+        File.Delete(tmp);
+    }
+}</code></pre>
+    </section>
+
+    <!-- 4.4 -->
+    <section id="calc">
+      <h2>4.4. Расчёт тарифов (TariffCalculator)</h2>
+      <p>Правило <code>ceil_30min</code>: если остаток минут ≥ 30 — округлять вверх до часа. Для <code>Mode=day</code> — кратно суткам, округление вверх при любом неполном дне.</p>
+      <pre><code class="language-csharp">using RentalApp.Domain;
+
+namespace RentalApp.Services;
+
+public sealed class TariffCalculator
+{
+    public decimal Calculate(Tariff t, DateTime start, DateTime end)
+    {
+        if (end &lt;= start) return 0m;
+
+        var span = end - start;
+
+        return t.Mode switch
+        {
+            "hour" => CalcHour(t, span),
+            "day"  => CalcDay(t, span),
+            "package" => t.Rate, // упрощённо: фикс
+            _ => throw new ArgumentOutOfRangeException(nameof(t.Mode))
+        };
+    }
+
+    private static decimal CalcHour(Tariff t, TimeSpan span)
+    {
+        var hours = (int)span.TotalHours;
+        var minutes = span.Minutes;
+
+        var billableHours = minutes >= 30 ? hours + 1 : hours;
+        if (billableHours == 0) billableHours = 1; // минимум 1 час
+
+        return billableHours * t.Rate;
+    }
+
+    private static decimal CalcDay(Tariff t, TimeSpan span)
+    {
+        var days = (int)Math.Ceiling(span.TotalDays);
+        if (days == 0) days = 1;
+        return days * t.Rate;
+    }
+}</code></pre>
+    </section>
+
+    <!-- 4.5 -->
+    <section id="service">
+      <h2>4.5. Бизнес-логика аренды (RentalService)</h2>
+      <pre><code class="language-csharp">using RentalApp.Domain;
+
+namespace RentalApp.Services;
+
+public sealed class RentalService
+{
+    private readonly DataStorage _db;
+    private readonly TariffCalculator _calc;
+
+    public RentalService(DataStorage db, TariffCalculator calc)
+    {
+        _db = db;
+        _calc = calc;
+    }
+
+    public Rental OpenRental(Guid customerId, Guid itemId, Guid tariffId, DateTime? startAt = null)
+    {
+        var customer = _db.Customers.FirstOrDefault(x => x.Id == customerId)
+            ?? throw new InvalidOperationException("Клиент не найден");
+        var item = _db.Items.FirstOrDefault(x => x.Id == itemId)
+            ?? throw new InvalidOperationException("Инвентарь не найден");
+        var tariff = _db.Tariffs.FirstOrDefault(x => x.Id == tariffId)
+            ?? throw new InvalidOperationException("Тариф не найден");
+
+        if (item.Status != "available")
+            throw new InvalidOperationException("Единица недоступна для выдачи");
+
+        item.ChangeStatus("rented");
+
+        var rental = new Rental
+        {
+            CustomerId = customer.Id,
+            ItemId = item.Id,
+            TariffId = tariff.Id,
+            // StartAt задаётся в конструкторе, но можно переопределить
+        };
+
+        if (startAt.HasValue)
+        {
+            // через рефлексию не меняем, просто создадим новый
+            rental = new Rental
+            {
+                CustomerId = customer.Id,
+                ItemId = item.Id,
+                TariffId = tariff.Id,
+                // фиксируем кастомный старт
+                // (для простоты оставим StartAt по умолчанию, либо добавьте сеттер)
+            };
+        }
+
+        _db.Rentals.Add(rental);
+        _db.SaveAll();
+        return rental;
+    }
+
+    public Rental CloseRental(Guid rentalId, DateTime endAt, decimal discount = 0, decimal penalty = 0)
+    {
+        var rental = _db.Rentals.FirstOrDefault(x => x.Id == rentalId)
+            ?? throw new InvalidOperationException("Договор не найден");
+        if (rental.Status == "closed")
+            throw new InvalidOperationException("Договор уже закрыт");
+
+        var item = _db.Items.First(x => x.Id == rental.ItemId);
+        var tariff = _db.Tariffs.First(x => x.Id == rental.TariffId);
+
+        var baseAmount = _calc.Calculate(tariff, rental.StartAt, endAt);
+        rental.Close(endAt, baseAmount, discount, penalty);
+
+        item.ChangeStatus("available");
+        _db.SaveAll();
+        return rental;
+    }
+
+    public IEnumerable&lt;Rental&gt; GetActiveRentals() => _db.Rentals.Where(r => r.Status == "open");
+}</code></pre>
+    </section>
+
+    <!-- 4.6 -->
+    <section id="ui">
+      <h2>4.6. Консольный интерфейс (ConsoleUi + Program)</h2>
+
+      <div class="filename">Utils/ConsoleUi.cs</div>
+      <pre><code class="language-csharp">using RentalApp.Domain;
+using RentalApp.Services;
+
+namespace RentalApp.Utils;
+
+public sealed class ConsoleUi
+{
+    private readonly DataStorage _db;
+    private readonly RentalService _service;
+
+    public ConsoleUi(DataStorage db, RentalService service)
+    {
+        _db = db;
+        _service = service;
+    }
+
+    public void Run()
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== Пункт проката ===");
+            Console.WriteLine("1. Список инвентаря");
+            Console.WriteLine("2. Список клиентов");
+            Console.WriteLine("3. Открыть аренду");
+            Console.WriteLine("4. Закрыть аренду");
+            Console.WriteLine("5. Активные аренды");
+            Console.WriteLine("0. Выход");
+            Console.Write("Выбор: ");
+            var choice = Console.ReadLine();
+
+            try
+            {
+                switch (choice)
+                {
+                    case "1": ShowItems(); break;
+                    case "2": ShowCustomers(); break;
+                    case "3": OpenRental(); break;
+                    case "4": CloseRental(); break;
+                    case "5": ShowActive(); break;
+                    case "0": return;
+                    default: Console.WriteLine("Неизвестная команда."); break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка: {ex.Message}");
+            }
+        }
+    }
+
+    private void ShowItems()
+    {
+        foreach (var i in _db.Items)
+            Console.WriteLine($"{i.InvNumber} [{i.Category}] — {i.Status}");
+    }
+
+    private void ShowCustomers()
+    {
+        foreach (var c in _db.Customers)
+            Console.WriteLine($"{c.FullName} — {c.Phone}");
+    }
+
+    private void OpenRental()
+    {
+        var cust = _db.Customers.FirstOrDefault() ?? throw new Exception("Нет клиентов");
+        var item = _db.Items.FirstOrDefault(x => x.Status == "available") ?? throw new Exception("Нет доступного инвентаря");
+        var tariff = _db.Tariffs.FirstOrDefault() ?? throw new Exception("Нет тарифов");
+
+        var r = _service.OpenRental(cust.Id, item.Id, tariff.Id);
+        Console.WriteLine($"Аренда открыта: {r.Id}, предмет {item.InvNumber}, клиент {cust.FullName}");
+    }
+
+    private void CloseRental()
+    {
+        var open = _service.GetActiveRentals().FirstOrDefault() ?? throw new Exception("Нет активных аренд");
+        var closed = _service.CloseRental(open.Id, DateTime.Now.AddHours(1).AddMinutes(35)); // пример: 1ч35м
+        Console.WriteLine($"Аренда закрыта: {closed.Id}, сумма {closed.Total:F2}");
+    }
+
+    private void ShowActive()
+    {
+        var list = _service.GetActiveRentals().ToList();
+        if (list.Count == 0) { Console.WriteLine("Активных аренд нет."); return; }
+        foreach (var r in list) Console.WriteLine($"ID={r.Id} start={r.StartAt}");
+    }
+}</code></pre>
+
+      <div class="filename">Program.cs</div>
+      <pre><code class="language-csharp">using RentalApp.Services;
+using RentalApp.Utils;
+
+var dataDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "data");
+var db = new DataStorage(dataDir);
+db.LoadAll();
+
+// если пусто — создадим минимальный набор данных
+SeedIfEmpty(db);
+
+var calc = new TariffCalculator();
+var rentalService = new RentalService(db, calc);
+
+var ui = new ConsoleUi(db, rentalService);
+ui.Run();
+
+static void SeedIfEmpty(DataStorage db)
+{
+    if (!db.Customers.Any())
+    {
+        db.Customers.Add(new() { FullName = "Иванов Иван", Phone = "+7-900-000-00-01", DocumentId = "AB123456" });
+        db.Customers.Add(new() { FullName = "Петров Пётр", Phone = "+7-900-000-00-02" });
+    }
+    if (!db.Items.Any())
+    {
+        db.Items.Add(new() { InvNumber = "INV-0001", Category = "Bicycle" });
+        db.Items.Add(new() { InvNumber = "INV-0002", Category = "Skates" });
+    }
+    if (!db.Tariffs.Any())
+    {
+        db.Tariffs.Add(new() { Name = "Часовой", Mode = "hour", Rate = 300m, RoundRule = "ceil_30min" });
+        db.Tariffs.Add(new() { Name = "Суточный", Mode = "day", Rate = 1200m });
+    }
+    db.SaveAll();
+}</code></pre>
+    </section>
+
+    <!-- 4.7 -->
+    <section id="seed">
+      <h2>4.7. Пример исходных данных (<span class="mono">data/*.json</span>)</h2>
+
+      <div class="filename">customers.json (фрагмент)</div>
+      <pre><code class="language-json">[
+  { "Id": "d2f3a1c3-0000-0000-0000-000000000001", "FullName": "Иванов Иван", "Phone": "+7-900-000-00-01", "DocumentId": "AB123456" },
+  { "Id": "d2f3a1c3-0000-0000-0000-000000000002", "FullName": "Петров Пётр", "Phone": "+7-900-000-00-02" }
+]</code></pre>
+
+      <div class="filename">items.json (фрагмент)</div>
+      <pre><code class="language-json">[
+  { "Id": "e1e1e1e1-0000-0000-0000-000000000001", "InvNumber": "INV-0001", "Category": "Bicycle", "Condition": "Good", "Status": "available" },
+  { "Id": "e1e1e1e1-0000-0000-0000-000000000002", "InvNumber": "INV-0002", "Category": "Skates", "Condition": "Good", "Status": "available" }
+]</code></pre>
+
+      <div class="filename">tariffs.json (фрагмент)</div>
+      <pre><code class="language-json">[
+  { "Id": "f1f1f1f1-0000-0000-0000-000000000001", "Name": "Часовой", "Mode": "hour", "Rate": 300, "RoundRule": "ceil_30min" },
+  { "Id": "f1f1f1f1-0000-0000-0000-000000000002", "Name": "Суточный", "Mode": "day", "Rate": 1200 }
+]</code></pre>
+
+      <p class="subtitle">Примечание: GUID’ы можно не фиксировать руками — код их сгенерирует; значения приведены для ориентира.</p>
+    </section>
+
+    <!-- 4.8 -->
+    <section id="ux">
+      <h2>4.8. Описание интерфейса пользователя</h2>
+
+      <h3>Консольный вариант (базовый для дисциплины «Основы программирования»)</h3>
+      <ul>
+        <li>Главное меню: «Список инвентаря», «Список клиентов», «Открыть аренду», «Закрыть аренду», «Активные аренды», «Выход».</li>
+        <li>Подтверждения и сообщения об ошибках (валидация, недоступность объектов).</li>
+        <li>Для упрощения «Открыть аренду» выбирает первого доступного клиента/инвентарь/тариф; студенты могут заменить на интерактивный выбор по ID.</li>
+      </ul>
+
+      <h3>Windows Forms (вариант для сильных студентов)</h3>
+      <ul>
+        <li>Вкладки: «Инвентарь», «Клиенты», «Аренда», «Тарифы», «Отчёты».</li>
+        <li>Валидация обязательных полей (иконки/подсказки), подтверждение удалений.</li>
+        <li>Экспорт CSV в один клик.</li>
+      </ul>
+    </section>
+
+    <!-- 4.9 -->
+    <section id="quality">
+      <h2>4.9. Замечания по качеству кода</h2>
+      <ul>
+        <li>Именование — PascalCase для типов/свойств, camelCase для локальных переменных.</li>
+        <li>XML-комментарии к публичным методам; Guard-проверки на <code>null</code>/<code>string.Empty</code> при вводе.</li>
+        <li>Обработка исключений — в UI-слое; исключительные ситуации в бизнес-логике не «глушить».</li>
+        <li>Атомарная запись файлов (через <span class="mono">.tmp</span>) для предотвращения утери данных.</li>
+        <li>Декомпозиция по слоям: Domain / Services / Utils / UI.</li>
+      </ul>
+    </section>
+
+    <!-- 4.10 -->
+    <section id="demo">
+      <h2>4.10. Пример готового приложения</h2>
+      <p><a href="https://github.com/OlgaKraven/rental-sport-inventory.git">https://github.com/OlgaKraven/rental-sport-inventory.git</a></p>
+    </section>
+
+
+  </div>
+</body>
+</html>

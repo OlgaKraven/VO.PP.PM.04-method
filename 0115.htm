@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>5. Тестирование и отладка — Система аренды спортивного инвентаря</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- общий стиль -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- локальные штрихи + границы таблиц -->
+  <style>
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #cfcfcf; padding: 6px 8px; vertical-align: top; }
+    th { background: #f7f7f9; text-align: left; }
+    code, pre code { background: #f6f8fa; border-radius: 4px; }
+    pre { overflow: auto; padding: 10px; background: #f6f8fa; border: 1px solid #e5e7eb; border-radius: 6px; }
+    nav a { margin-right: 10px; }
+    .subtitle { color:#666; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .note { color:#555; font-style: italic; }
+  </style>
+
+  <!-- Mermaid -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });</script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>5. Тестирование и отладка</h1>
+      <div class="subtitle">Учебный кейс: «Система аренды спортивного инвентаря»</div>
+      <nav>
+        <a href="#strategy">5.1 Стратегия</a>
+        <a href="#classes">5.2 Классы эквивалентности</a>
+        <a href="#decision">5.3 Decision tables</a>
+        <a href="#cases">5.4 Тест-кейсы</a>
+        <a href="#io">5.5 Таблицы вход/выход</a>
+        <a href="#unit">5.6 Модульные тесты</a>
+        <a href="#negative">5.7 Негативные сценарии</a>
+        <a href="#bugs">5.8 Дефект-лист</a>
+        <a href="#debug">5.9 Отладка</a>
+        <a href="#accept">5.10 Критерии приёмки</a>
+      </nav>
+    </header>
+
+    <!-- 5.1 -->
+    <section id="strategy">
+      <h2>5.1. Стратегия тестирования</h2>
+      <p><strong>Цель:</strong> подтвердить корректность расчётов, статусов, целостность данных (JSON), устойчивость к ошибочному вводу и соответствие ТЗ.</p>
+      <p><strong>Объекты тестирования:</strong> <code>TariffCalculator</code>, <code>RentalService</code>, <code>DataStorage</code>, модели (<code>InventoryItem</code>, <code>Rental</code>), консольный UI.</p>
+
+      <table>
+        <thead>
+          <tr><th>Вид тестов</th><th>Покрытие</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Модульные</td><td>расчёт тарифов, изменение статусов, закрытие аренды</td></tr>
+          <tr><td>Интеграционные</td><td>цепочка: UI → Service → Storage</td></tr>
+          <tr><td>Границы/классы</td><td>интервалы времени (rounding), эквивалентные классы ввода</td></tr>
+          <tr><td>Негативные</td><td>ошибки/исключения (недоступный инвентарь, битый JSON)</td></tr>
+          <tr><td>Регрессионные</td><td>повторный прогон после исправлений</td></tr>
+          <tr><td>Простейшая производительность</td><td>отклик на наборе до 1000 записей</td></tr>
+        </tbody>
+      </table>
+
+      <details>
+        <summary>Mermaid: жизненный цикл дефекта (опционально)</summary>
+        <pre class="mermaid">
+flowchart LR
+  Found[Найден дефект] --> Logged[Заведён BUG]
+  Logged --> Dev[Исправление]
+  Dev --> Test[Проверка/регресс]
+  Test -->|OK| Closed[Закрыт]
+  Test -->|Fail| Reopen[Переоткрыт] --> Dev
+        </pre>
+      </details>
+    </section>
+
+    <!-- 5.2 -->
+    <section id="classes">
+      <h2>5.2. Эквивалентные классы и граничные значения</h2>
+
+      <h3>5.2.1. Ввод времени (start/end)</h3>
+      <ul>
+        <li><strong>Допустимые:</strong> <code>end &gt; start</code> → расчёт &gt; 0.</li>
+        <li><strong>Недопустимые:</strong> <code>end == start</code> или <code>end &lt; start</code> → сумма = 0 (или исключение по политике).</li>
+        <li><strong>Границы:</strong> 59/60/61 мин, 1ч29м/1ч30м/1ч31м; 23:59 → 00:01 (переход суток).</li>
+      </ul>
+
+      <h3>5.2.2. Статусы инвентаря</h3>
+      <ul>
+        <li><strong>Допустимые:</strong> <code>available</code>, <code>rented</code>, <code>maintenance</code>.</li>
+        <li><strong>Недопустимые:</strong> любое иное значение → исключение.</li>
+      </ul>
+
+      <h3>5.2.3. Тарифы</h3>
+      <ul>
+        <li><strong>Modes:</strong> <code>hour</code>, <code>day</code>, <code>package</code>.</li>
+        <li><strong>Rate:</strong> &ge; 0; при <code>package</code> — фикс.</li>
+      </ul>
+    </section>
+
+    <!-- 5.3 -->
+    <section id="decision">
+      <h2>5.3. Решающие таблицы (decision tables)</h2>
+
+      <h3>5.3.1. Округление для <code>hour</code> при правиле <code>ceil_30min</code></h3>
+      <table>
+        <thead>
+          <tr><th>Минуты</th><th>Ожидаемый биллинговый час</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>0–29</td><td>hours</td></tr>
+          <tr><td>30–59</td><td>hours + 1</td></tr>
+          <tr><td colspan="2"><em>Минимум 1 час независимо от длительности &gt; 0 мин.</em></td></tr>
+        </tbody>
+      </table>
+
+      <h3>5.3.2. Суточный тариф <code>day</code></h3>
+      <table>
+        <thead>
+          <tr><th>Длительность</th><th>Ожидаемые дни к оплате</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1–24 ч</td><td>1</td></tr>
+          <tr><td>24 ч + 1 мин</td><td>2</td></tr>
+          <tr><td>N суток ровно</td><td>N</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5.4 -->
+    <section id="cases">
+      <h2>5.4. Таблица тестовых сценариев (key test cases)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Что тестируем</th><th>Входные данные</th><th>Ожидаемый результат</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>TC-CALC-01</td><td>Часовой: 15 мин</td><td>start=10:00 end=10:15 rate=300</td><td>1 * 300 = 300</td></tr>
+          <tr><td>TC-CALC-02</td><td>Часовой: 1ч29м</td><td>start=10:00 end=11:29 rate=300</td><td>1 * 300 = 300</td></tr>
+          <tr><td>TC-CALC-03</td><td>Часовой: 1ч30м</td><td>start=10:00 end=11:30 rate=300</td><td>2 * 300 = 600</td></tr>
+          <tr><td>TC-CALC-04</td><td>Часовой: 1ч35м</td><td>start=10:00 end=11:35 rate=300</td><td>2 * 300 = 600</td></tr>
+          <tr><td>TC-CALC-05</td><td>Переход суток</td><td>start=23:30 end=00:20 rate=300</td><td>1 * 300 = 300</td></tr>
+          <tr><td>TC-CALC-06</td><td>Суточный: 25 ч</td><td>mode=day rate=1200</td><td>2 * 1200 = 2400</td></tr>
+          <tr><td>TC-STATUS-01</td><td>Открытие аренды</td><td>item.status=available</td><td>rental open, item=rented</td></tr>
+          <tr><td>TC-STATUS-02</td><td>Двойная выдача</td><td>item.status=rented</td><td>исключение «недоступна для выдачи»</td></tr>
+          <tr><td>TC-RENT-01</td><td>Закрытие аренды</td><td>open → close (1ч35м)</td><td>total = 600, item=available</td></tr>
+          <tr><td>TC-DATA-01</td><td>JSON запись</td><td>SaveAll()</td><td>файлы обновлены, валидный JSON</td></tr>
+          <tr><td>TC-NEG-01</td><td>Неверный статус</td><td>ChangeStatus("bad")</td><td>исключение OutOfRange</td></tr>
+          <tr><td>TC-NEG-02</td><td>end &lt; start</td><td>Calculate</td><td>сумма 0 (или исключение по политике)</td></tr>
+          <tr><td>TC-PERF-01</td><td>1000 записей</td><td>операции поиска</td><td>отклик ≤ 1 c (локально)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5.5 -->
+    <section id="io">
+      <h2>5.5. Таблица входных/выходных данных (фрагмент)</h2>
+
+      <h3>5.5.1. Расчёт по часовому тарифу (<code>rate = 300</code>)</h3>
+      <table>
+        <thead>
+          <tr><th>start</th><th>end</th><th>Минут сумм.</th><th>Биллинговые часы</th><th>Ожид. сумма</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>10:00</td><td>10:15</td><td>15</td><td>1</td><td>300</td></tr>
+          <tr><td>10:00</td><td>10:59</td><td>59</td><td>1</td><td>300</td></tr>
+          <tr><td>10:00</td><td>11:00</td><td>60</td><td>1</td><td>300</td></tr>
+          <tr><td>10:00</td><td>11:30</td><td>90</td><td>2</td><td>600</td></tr>
+          <tr><td>10:00</td><td>11:35</td><td>95</td><td>2</td><td>600</td></tr>
+        </tbody>
+      </table>
+
+      <h3>5.5.2. Суточный (<code>rate = 1200</code>)</h3>
+      <table>
+        <thead>
+          <tr><th>Длительность</th><th>Ожид. дни</th><th>Сумма</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>12 ч</td><td>1</td><td>1200</td></tr>
+          <tr><td>24 ч</td><td>1</td><td>1200</td></tr>
+          <tr><td>25 ч</td><td>2</td><td>2400</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5.6 -->
+    <section id="unit">
+      <h2>5.6. Примеры модульных тестов (NUnit)</h2>
+      <p class="note">Если потребуется, можно вынести в отдельный проект <span class="mono">RentalApp.Tests</span> и подключить <span class="mono">NUnit</span>.</p>
+      <pre><code class="language-bash">// Install-Package NUnit
+// Install-Package NUnit3TestAdapter
+// Install-Package Microsoft.NET.Test.Sdk</code></pre>
+      <pre><code class="language-csharp">using NUnit.Framework;
+using RentalApp.Services;
+using RentalApp.Domain;
+
+[TestFixture]
+public class TariffCalculatorTests
+{
+    [Test]
+    public void Hour_1h30m_RoundsUp()
+    {
+        var t = new Tariff { Mode = "hour", Rate = 300, RoundRule = "ceil_30min" };
+        var calc = new TariffCalculator();
+        var sum = calc.Calculate(t, new DateTime(2025,1,1,10,0,0), new DateTime(2025,1,1,11,30,0));
+        Assert.AreEqual(600m, sum);
+    }
+
+    [Test]
+    public void Day_25h_TwoDays()
+    {
+        var t = new Tariff { Mode = "day", Rate = 1200 };
+        var calc = new TariffCalculator();
+        var sum = calc.Calculate(t, new DateTime(2025,1,1,10,0,0), new DateTime(2025,1,2,11,0,0));
+        Assert.AreEqual(2400m, sum);
+    }
+}</code></pre>
+    </section>
+
+    <!-- 5.7 -->
+    <section id="negative">
+      <h2>5.7. Негативные сценарии (обязательные проверки)</h2>
+      <table>
+        <thead>
+          <tr><th>Сценарий</th><th>Действие</th><th>Ожидаемый результат</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Пустые файлы данных</td><td>LoadAll()</td><td>списки инициализируются пустыми, приложение не падает</td></tr>
+          <tr><td>Отсутствует каталог <span class="mono">data</span></td><td>запуск</td><td>каталог создаётся, файлы появляются при SaveAll()</td></tr>
+          <tr><td>Повреждённый JSON</td><td>LoadAll()</td><td>информативная ошибка в UI, предложение восстановить/пересоздать</td></tr>
+          <tr><td>Попытка закрыть закрытую аренду</td><td>CloseRental()</td><td>исключение «уже закрыт»</td></tr>
+          <tr><td>Выдача единицы на ТО</td><td>status=maintenance</td><td>отказ в операции</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5.8 -->
+    <section id="bugs">
+      <h2>5.8. Дефект-лист (образец)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Версия</th><th>Описание дефекта</th><th>Шаги воспроизведения</th><th>Факт. результат</th><th>Ожид. результат</th><th>Статус</th><th>Исправление</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>BUG-001</td><td>v1.0</td><td>Округление 1ч30м даёт 300</td><td>start=10:00 end=11:30</td><td>300</td><td>600</td><td>Fixed</td><td>исправлен расчёт minutes &gt;= 30</td></tr>
+          <tr><td>BUG-002</td><td>v1.0</td><td>Выдача предмета со статусом maintenance</td><td>OpenRental на item=maintenance</td><td>аренда создана</td><td>отказ</td><td>Fixed</td><td>проверка статуса в OpenRental</td></tr>
+          <tr><td>BUG-003</td><td>v1.0</td><td>Повреждённый JSON падает без сообщения</td><td>Запуск с битым items.json</td><td>исключение в консоли</td><td>понятное сообщение</td><td>Fixed</td><td>try/catch в Load, текст в UI</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5.9 -->
+    <section id="debug">
+      <h2>5.9. Отладка: рекомендации</h2>
+      <ul>
+        <li>Включать пошаговую отладку в местах: расчёт тарифа, изменение статусов, сериализация/десериализация.</li>
+        <li>Локально логировать ключевые действия (<code>Console.WriteLine</code>): открытие/закрытие аренды, пути файлов, размеры коллекций.</li>
+        <li>Проверять наличие прав записи в каталог <span class="mono">data/</span>.</li>
+        <li>Для регресса — сохранять набор тестовых JSON и прогонять «скрипты» сценариев (последовательность действий в UI).</li>
+      </ul>
+    </section>
+
+    <!-- 5.10 -->
+    <section id="accept">
+      <h2>5.10. Критерии приёмки блока тестирования (соответствие ТЗ)</h2>
+      <ul>
+        <li>Пройдены тесты <span class="mono">TC-CALC-01..06</span>, <span class="mono">TC-STATUS-01..02</span>, <span class="mono">TC-RENT-01</span>, <span class="mono">TC-DATA-01</span>, <span class="mono">TC-NEG-01..02</span>.</li>
+        <li>На тестовом наборе до ~1000 записей время отклика ≤ 1 c (ручной замер).</li>
+        <li>Дефект-лист содержит найденные ошибки и их исправления.</li>
+        <li>В отчёте есть таблицы вход/выход, скриншоты и/или логи демонстрации.</li>
+      </ul>
+    </section>
+ 
+  </div>
+</body>
+</html>
